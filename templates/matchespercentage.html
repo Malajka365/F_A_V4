@@ -377,12 +377,60 @@
                             </th>
                             <th>
                                 <div class="number-range-filter" data-column-index="21">
-                                    <input type="text" class="filter-input" disabled>
+                                    <input type="text"
+                                           class="filter-input numeric-min"
+                                           placeholder="Min"
+                                           pattern="[0-9]+([\.,][0-9]+)?"
+                                           title="Tizedes érték (pl. 2.5 vagy 3,14)">
+                                    <input type="text"
+                                           class="filter-input numeric-max"
+                                           placeholder="Max"
+                                           pattern="[0-9]+([\.,][0-9]+)?"
+                                           title="Tizedes érték (pl. 2.5 vagy 3,14)">
                                 </div>
                             </th>
-                            <th></th>
-                            <th></th>
-                            <th></th>
+                            <th>
+                                <div class="number-range-filter" data-column-index="22">
+                                    <input type="text"
+                                           class="filter-input numeric-min"
+                                           placeholder="Min"
+                                           pattern="[0-9]+([\.,][0-9]+)?"
+                                           title="Tizedes érték (pl. 2.5 vagy 3,14)">
+                                    <input type="text"
+                                           class="filter-input numeric-max"
+                                           placeholder="Max"
+                                           pattern="[0-9]+([\.,][0-9]+)?"
+                                           title="Tizedes érték (pl. 2.5 vagy 3,14)">
+                                </div>
+                            </th>
+                            <th>
+                                <div class="number-range-filter" data-column-index="23">
+                                    <input type="text"
+                                           class="filter-input numeric-min"
+                                           placeholder="Min"
+                                           pattern="[0-9]+([\.,][0-9]+)?"
+                                           title="Tizedes érték (pl. 2.5 vagy 3,14)">
+                                    <input type="text"
+                                           class="filter-input numeric-max"
+                                           placeholder="Max"
+                                           pattern="[0-9]+([\.,][0-9]+)?"
+                                           title="Tizedes érték (pl. 2.5 vagy 3,14)">
+                                </div>
+                            </th>
+                            <th>
+                                <div class="number-range-filter" data-column-index="24">
+                                    <input type="text"
+                                           class="filter-input numeric-min"
+                                           placeholder="Min"
+                                           pattern="[0-9]+([\.,][0-9]+)?"
+                                           title="Tizedes érték (pl. 2.5 vagy 3,14)">
+                                    <input type="text"
+                                           class="filter-input numeric-max"
+                                           placeholder="Max"
+                                           pattern="[0-9]+([\.,][0-9]+)?"
+                                           title="Tizedes érték (pl. 2.5 vagy 3,14)">
+                                </div>
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
@@ -402,35 +450,6 @@
 
     <script>
         $(document).ready(function() {
-            // Segédfüggvény a numerikus értékek kezeléséhez
-            function parseNumericRange(value) {
-                if (!value) return null;
-                value = value.trim();
-                
-                // Ha tartomány (pl. "1.5-2.5")
-                if (value.includes('-')) {
-                    const [min, max] = value.split('-').map(v => {
-                        const parsed = parseFloat(v.trim());
-                        return isNaN(parsed) ? null : parsed;
-                    });
-                    
-                    if (min !== null || max !== null) {
-                        const filter = {};
-                        if (min !== null) filter.min = min;
-                        if (max !== null) filter.max = max;
-                        return JSON.stringify(filter);
-                    }
-                }
-                
-                // Ha egyetlen szám
-                const num = parseFloat(value);
-                if (!isNaN(num)) {
-                    return JSON.stringify({ min: num, max: num });
-                }
-                
-                return null;
-            }
-
             var table = $('#matchesTable').DataTable({
                 processing: true,
                 serverSide: true,

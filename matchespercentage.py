@@ -223,36 +223,42 @@ def get_matches_percentage_data():
         if filters:
             where_clause = " AND " + " AND ".join(filters)
 
-        # Rendezési paraméterek
+        # Rendezési paraméterek (SQL-hez, Edge oszlopok nélkül)
         order_column_idx = request.args.get('order[0][column]', type=int, default=0)
         order_direction = request.args.get('order[0][dir]', default='desc')
         
-        edge_columns = {22: 'home_edge', 23: 'draw_edge', 24: 'away_edge'}
-        if order_column_idx in edge_columns:
-            # Cannot sort in SQL, handle later in Python
-            order_clause = ""
-        else:
+        sql_order_clause = ""
+        # Az Edge oszlopokra (22, 23, 24) és a total_away_percentage (21) oszlopra később, Pythonban rendezünk
+        # Mivel a total_away_percentage (p.away_win_percentage) már az SQL-ben is létezik,
+        # a 21-es oszlopra történő rendezést SQL-ben is meg lehetne tenni, de az egyszerűség kedvéért
+        # az összes Pythonban számított/használt oszlopot Pythonban rendezzük.
+        edge_column_indices = {21, 22, 23, 24}
+
+        if order_column_idx not in edge_column_indices and order_column_idx in allowed_columns:
             order_column = allowed_columns.get(order_column_idx, 'f.date')
-            order_clause = f" ORDER BY {order_column} {order_direction}"
-        
-        # Végső lekérdezés összeállítása
-        final_query = f"{base_query}{where_clause}{order_clause} LIMIT ? OFFSET ?"
-        filter_values.extend([length, start])
+            sql_order_clause = f" ORDER BY {order_column} {order_direction}"
+        elif order_column_idx not in edge_column_indices: # Ha nincs explicit SQL rendezés, alapértelmezett
+             sql_order_clause = f" ORDER BY f.date {order_direction}"
+
+
+        # Végső lekérdezés összeállítása (LIMIT és OFFSET nélkül egyelőre)
+        # A lapozást a Python oldali szűrés után végezzük el
+        final_query = f"{base_query}{where_clause}{sql_order_clause}"
         
         # Debug log
-        logger.debug(f"Végső SQL lekérdezés: {final_query}")
-        logger.debug(f"Paraméterek: {filter_values}")
+        logger.debug(f"SQL lekérdezés (lapozás előtt): {final_query}")
+        logger.debug(f"SQL paraméterek: {filter_values}")
         
         # Lekérdezés végrehajtása
         cursor.execute(final_query, filter_values)
-        data = []
+        all_data_from_sql = []
         for row in cursor.fetchall():
             row_dict = dict(row)
             try:
                 # Implied probabilities from odds
-                implied_home = 100 / row_dict['calc_home_odd_for_diff'] if row_dict['calc_home_odd_for_diff'] else 0
-                implied_draw = 100 / row_dict['calc_draw_odd_for_diff'] if row_dict['calc_draw_odd_for_diff'] else 0
-                implied_away = 100 / row_dict['calc_away_odd_for_diff'] if row_dict['calc_away_odd_for_diff'] else 0
+                implied_home = 100 / row_dict['calc_home_odd_for_diff'] if row_dict['calc_home_odd_for_diff'] and row_dict['calc_home_odd_for_diff'] != 0 else 0
+                implied_draw = 100 / row_dict['calc_draw_odd_for_diff'] if row_dict['calc_draw_odd_for_diff'] and row_dict['calc_draw_odd_for_diff'] != 0 else 0
+                implied_away = 100 / row_dict['calc_away_odd_for_diff'] if row_dict['calc_away_odd_for_diff'] and row_dict['calc_away_odd_for_diff'] != 0 else 0
 
                 diff_home = round(row_dict.get('home_win_percentage', 0) - implied_home, 2)
                 diff_draw = round(row_dict.get('draw_win_percentage', 0) - implied_draw, 2)
@@ -261,39 +267,112 @@ def get_matches_percentage_data():
                 row_dict['home_edge'] = diff_home
                 row_dict['draw_edge'] = diff_draw
                 row_dict['away_edge'] = diff_away
-            except Exception:
+            except Exception as e_calc:
+                logger.error(f"Hiba az Edge értékek számításakor: {str(e_calc)} sor: {row_dict.get('fixture_id', 'N/A')}")
                 row_dict['home_edge'] = row_dict['draw_edge'] = row_dict['away_edge'] = None
 
             # Remove helper keys so they don't get sent to client
             for k in ['calc_home_odd_for_diff', 'calc_draw_odd_for_diff', 'calc_away_odd_for_diff']:
                 row_dict.pop(k, None)
-            data.append(row_dict)
+            all_data_from_sql.append(row_dict)
 
-        # If ordering requested on edge columns, sort here
-        if order_column_idx in {22,23,24}:
-            key = {22: 'home_edge', 23: 'draw_edge', 24: 'away_edge'}[order_column_idx]
-            reverse = (order_direction == 'desc')
-            # None values should be last regardless of direction
-            data.sort(key=lambda x: (x[key] is None, x[key]), reverse=reverse)
+        # Python oldali szűrés az Edge% oszlopokra és Összes Vendég %-ra (ha van)
+        # Az Összes Vendég % (total_away_percentage) oszlop indexe 21, ami 'p.away_win_percentage' az SQL-ben
+        # és 'total_away_percentage' a Python dict-ben.
+        # Az Edge oszlopok indexei: home_edge: 22, draw_edge: 23, away_edge: 24
+
+        python_filtered_data = []
         
-        # Összes rekord számának lekérdezése
-        count_query = f"SELECT COUNT(*) as count FROM ({base_query}{where_clause})"
-        cursor.execute(count_query, filter_values[:-2])  # length és offset paraméterek nélkül
-        total_filtered = cursor.fetchone()['count']
+        # Szűrő paraméterek az Edge oszlopokhoz és total_away_percentage-hez
+        edge_filter_params = {}
+        # Oszlop indexek a frontendről, és a megfelelő kulcsok a `row_dict`-ben
+        python_filterable_columns = {
+            21: 'total_away_percentage', # Ez az 'Összes Vendég %'
+            22: 'home_edge',
+            23: 'draw_edge',
+            24: 'away_edge'
+        }
+
+        for col_idx, data_key in python_filterable_columns.items():
+            search_value_str = request.args.get(f'columns[{col_idx}][search][value]', '').strip()
+            if search_value_str:
+                try:
+                    search_params = json.loads(search_value_str)
+                    min_val = search_params.get('min')
+                    max_val = search_params.get('max')
+
+                    # Vessző csere pontra és float konverzió
+                    if min_val is not None:
+                        min_val = float(str(min_val).replace(',', '.'))
+                    if max_val is not None:
+                        max_val = float(str(max_val).replace(',', '.'))
+
+                    edge_filter_params[data_key] = {'min': min_val, 'max': max_val}
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.warning(f"Érvénytelen JSON vagy érték a(z) {data_key} szűrőhöz: {search_value_str}, hiba: {e}")
+
+
+        for row_dict in all_data_from_sql:
+            match = True
+            for data_key, params in edge_filter_params.items():
+                value = row_dict.get(data_key)
+                if value is None: # Ha az érték None, nem felel meg a min/max szűrőnek (kivéve, ha a szűrő is None)
+                    match = False
+                    break
+
+                # Kerekítés 2 tizedesjegyre a szűrés előtt, ahogy a process_numeric_filter is teszi
+                # Az Edge értékek már kerekítve vannak a számításkor.
+                # A total_away_percentage (p.away_win_percentage) is valószínűleg kerekítve van az adatbázisban vagy a rendereléskor.
+                # A biztonság kedvéért itt is kerekíthetünk, ha szükséges, de a `value` már a végleges érték.
+
+                if params['min'] is not None and round(value, 2) < round(params['min'], 2):
+                    match = False
+                    break
+                if params['max'] is not None and round(value, 2) > round(params['max'], 2):
+                    match = False
+                    break
+
+            if match:
+                python_filtered_data.append(row_dict)
+
+        total_filtered_after_python = len(python_filtered_data)
+
+        # Rendezés Pythonban, ha a rendezési oszlop az Edge vagy total_away_percentage oszlopok egyike
+        # A `order_column_idx` a frontend által küldött oszlopindex
+        # `python_filterable_columns` mapolja ezt a `row_dict` kulcsaira
+        if order_column_idx in python_filterable_columns:
+            sort_key_name = python_filterable_columns[order_column_idx]
+            reverse_sort = (order_direction == 'desc')
+
+            # None értékek hátra kerüljenek függetlenül a rendezési iránytól
+            python_filtered_data.sort(key=lambda x: (x[sort_key_name] is None, x[sort_key_name]), reverse=reverse_sort)
+        elif not sql_order_clause: # Ha nem volt SQL rendezés (mert pl. Edge oszlopra volt, de az üres)
+                                   # és a jelenlegi order_column_idx sem Pythonban rendezendő, akkor alapértelmezett dátum szerint.
+                                   # Ez a rész már nem feltétlenül szükséges, ha az sql_order_clause mindig beállít egy alap rendezést.
+            python_filtered_data.sort(key=lambda x: x.get('date', datetime.min.isoformat()), reverse=(order_direction == 'desc'))
+
+
+        # Lapozás alkalmazása a Python által szűrt és rendezett adatokra
+        paginated_data = python_filtered_data[start : start + length]
         
-        # Összes rekord száma szűrés nélkül
-        cursor.execute("SELECT COUNT(*) as count FROM fixtures f LEFT JOIN match_pr_data_this_season m ON f.id = m.fixture_id WHERE m.include_in_stats = 1")
-        total_records = cursor.fetchone()['count']
+        # Összes rekord száma szűrés nélkül (ez maradhat, a teljes adatbázisra vonatkozik)
+        # Ezt csak egyszer kell lekérdezni, ha még nincs meg.
+        # Mivel ez a függvény minden DataTables kérésre lefut, optimalizálható lenne,
+        # de a jelenlegi működés szerint hagyjuk.
+        if 'total_records' not in locals() or total_records is None: # Csak akkor, ha még nem volt beállítva
+            count_query_total = "SELECT COUNT(*) as count FROM fixtures f LEFT JOIN match_pr_data_this_season m ON f.id = m.fixture_id WHERE m.include_in_stats = 1"
+            cursor.execute(count_query_total)
+            total_records = cursor.fetchone()['count']
         
         return jsonify({
             'draw': draw,
             'recordsTotal': total_records,
-            'recordsFiltered': total_filtered,
-            'data': data
+            'recordsFiltered': total_filtered_after_python, # Ez most a Python szűrés utáni szám
+            'data': paginated_data
         })
         
     except Exception as e:
-        logger.error(f"Hiba történt: {str(e)}")
+        logger.error(f"Hiba történt a matches-percentage-data feldolgozásakor: {str(e)}", exc_info=True)
         return jsonify({
             'draw': request.args.get('draw', 1),
             'error': f"Hiba a szűrésben: {str(e)}",

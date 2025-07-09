@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PR Helper Statisztikák</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <style>
+        .navbar {
+            background-color: #343a40;
+            box-shadow: 0 2px 4px rgba(0,0,0,.1);
+            margin-bottom: 20px;
+        }
+        .navbar-brand {
+            color: #fff !important;
+            font-weight: bold;
+        }
+        .nav-link {
+            color: rgba(255,255,255,.8) !important;
+            transition: color 0.3s ease;
+        }
+        .nav-link:hover {
+            color: #fff !important;
+        }
+        .table-container {
+            margin-bottom: 30px;
+        }
+        .table th {
+            background-color: #343a40;
+            color: white;
+        }
+        .table-hover tbody tr:hover {
+            background-color: rgba(0,0,0,.075);
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigációs menü -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">Football Analyzer</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/"><i class="bi bi-arrow-left"></i> Vissza a főoldalra</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <h2 class="mb-4">PR Helper Statisztikák</h2>
+
+        <!-- Home táblázat -->
+        <div class="table-container">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3>Home Odds Statisztikák</h3>
+                <div class="stats-badge">
+                    <span class="badge bg-primary">Összes meccs: {{ home_total_matches }}</span>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover" id="homeTable">
+                    <thead>
+                        <tr>
+                            <th>PR Különbség</th>
+                            <th>Odds Érték</th>
+                            <th>Összes Meccs</th>
+                            <th>Győzelmek</th>
+                            <th>Vereségek</th>
+                            <th>Győzelmi %</th>
+                            <th>Vereség %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in home_data %}
+                        <tr>
+                            <td>{{ row[0] }}</td>
+                            <td>{{ row[1] }}</td>
+                            <td>{{ row[2] }}</td>
+                            <td>{{ row[3] }}</td>
+                            <td>{{ row[4] }}</td>
+                            <td>{{ "%.2f"|format(row[5]) }}%</td>
+                            <td>{{ "%.2f"|format(row[6]) }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Draw táblázat -->
+        <div class="table-container">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3>Draw Odds Statisztikák</h3>
+                <div class="stats-badge">
+                    <span class="badge bg-primary">Összes meccs: {{ draw_total_matches }}</span>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover" id="drawTable">
+                    <thead>
+                        <tr>
+                            <th>PR Különbség</th>
+                            <th>Odds Érték</th>
+                            <th>Összes Meccs</th>
+                            <th>Győzelmek</th>
+                            <th>Vereségek</th>
+                            <th>Győzelmi %</th>
+                            <th>Vereség %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in draw_data %}
+                        <tr>
+                            <td>{{ row[0] }}</td>
+                            <td>{{ row[1] }}</td>
+                            <td>{{ row[2] }}</td>
+                            <td>{{ row[3] }}</td>
+                            <td>{{ row[4] }}</td>
+                            <td>{{ "%.2f"|format(row[5]) }}%</td>
+                            <td>{{ "%.2f"|format(row[6]) }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Away táblázat -->
+        <div class="table-container">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3>Away Odds Statisztikák</h3>
+                <div class="stats-badge">
+                    <span class="badge bg-primary">Összes meccs: {{ away_total_matches }}</span>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover" id="awayTable">
+                    <thead>
+                        <tr>
+                            <th>PR Különbség</th>
+                            <th>Odds Érték</th>
+                            <th>Összes Meccs</th>
+                            <th>Győzelmek</th>
+                            <th>Vereségek</th>
+                            <th>Győzelmi %</th>
+                            <th>Vereség %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in away_data %}
+                        <tr>
+                            <td>{{ row[0] }}</td>
+                            <td>{{ row[1] }}</td>
+                            <td>{{ row[2] }}</td>
+                            <td>{{ row[3] }}</td>
+                            <td>{{ row[4] }}</td>
+                            <td>{{ "%.2f"|format(row[5]) }}%</td>
+                            <td>{{ "%.2f"|format(row[6]) }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mérkőzések Modal -->
+    <div class="modal fade" id="matchesModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Mérkőzések</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="matchesTable">
+                            <thead>
+                                <tr>
+                                    <th>Dátum</th>
+                                    <th>Hazai</th>
+                                    <th>Eredmény</th>
+                                    <th>Vendég</th>
+                                    <th>PR Diff</th>
+                                    <th>Home Odds</th>
+                                    <th>Draw Odds</th>
+                                    <th>Away Odds</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            // DataTables inicializálása
+            const homeTable = $('#homeTable').DataTable({
+                order: [[0, 'asc']],
+                language: {
+                    url: "https://cdn.datatables.net/plug-ins/1.13.7/i18n/hu.json"
+                }
+            });
+            const drawTable = $('#drawTable').DataTable({
+                order: [[0, 'asc']],
+                language: {
+                    url: "https://cdn.datatables.net/plug-ins/1.13.7/i18n/hu.json"
+                }
+            });
+            const awayTable = $('#awayTable').DataTable({
+                order: [[0, 'asc']],
+                language: {
+                    url: "https://cdn.datatables.net/plug-ins/1.13.7/i18n/hu.json"
+                }
+            });
+
+            // Mérkőzések táblázat inicializálása
+            const matchesTable = $('#matchesTable').DataTable({
+                order: [[0, 'desc']],
+                language: {
+                    url: "https://cdn.datatables.net/plug-ins/1.13.7/i18n/hu.json"
+                }
+            });
+
+            // Sor kattintás kezelése
+            function handleRowClick(tableId, type) {
+                $(`#${tableId} tbody`).on('click', 'tr', function() {
+                    const data = $(`#${tableId}`).DataTable().row(this).data();
+                    const prDiff = data[0];
+                    const oddValue = data[1];
+                    
+                    // Mérkőzések lekérése
+                    $.get(`/api/pr-helper-matches?type=${type}&pr_diff=${prDiff}&odd_value=${oddValue}`)
+                        .done(function(response) {
+                            // Táblázat ürítése
+                            matchesTable.clear();
+                            
+                            // Új adatok hozzáadása
+                            response.matches.forEach(function(match) {
+                                matchesTable.row.add([
+                                    match.date,
+                                    match.home_team,
+                                    match.score,
+                                    match.away_team,
+                                    match.pr_diff,
+                                    match.home_odd,
+                                    match.draw_odd,
+                                    match.away_odd
+                                ]);
+                            });
+                            
+                            // Táblázat frissítése és modal megjelenítése
+                            matchesTable.draw();
+                            $('#matchesModal').modal('show');
+                        })
+                        .fail(function(jqXHR, textStatus, errorThrown) {
+                            alert('Hiba történt a mérkőzések betöltésekor');
+                            console.error(errorThrown);
+                        });
+                });
+            }
+
+            // Kattintás eseménykezelők hozzáadása
+            handleRowClick('homeTable', 'home');
+            handleRowClick('drawTable', 'draw');
+            handleRowClick('awayTable', 'away');
+        });
+    </script>
+</body>
+</html>

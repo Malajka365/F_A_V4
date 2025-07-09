@@ -1,0 +1,571 @@
+from flask import Flask, render_template, request, jsonify
+import sqlite3
+from datetime import datetime
+import math
+import logging
+
+# Logging beállítása
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+
+def get_db_connection():
+    try:
+        conn = sqlite3.connect('football.db')
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception as e:
+        logger.error(f"Adatbázis kapcsolódási hiba: {str(e)}")
+        raise
+
+@app.route('/api/matches')
+def get_matches():
+    try:
+        # Request paraméterek logolása
+        logger.debug(f"Beérkezett kérés paraméterek: {request.args}")
+        
+        # DataTables által küldött paraméterek
+        draw = request.args.get('draw', type=int)
+        start = request.args.get('start', type=int, default=0)
+        length = request.args.get('length', type=int, default=25)
+
+        # Jövőbeli mérkőzések szűrése
+        future_only = request.args.get('future_only', type=str) == 'true'
+        current_timestamp = int(datetime.now().timestamp())
+        
+        logger.debug(f"Jövőbeli mérkőzések szűrése: {future_only}")
+        logger.debug(f"Jelenlegi időbélyeg: {current_timestamp}")
+
+        # Rendezési paraméterek
+        order_column = request.args.get('order[0][column]', type=int, default=0)
+        order_dir = request.args.get('order[0][dir]', default='desc')
+
+        # Oszlopok megfeleltetése
+        columns = {
+            0: 'f.date',
+            1: 'f.league_country',
+            2: 'f.league_name',
+            3: 'f.home_team_name',
+            4: 'CAST(f.goals_home AS TEXT) || "-" || CAST(f.goals_away AS TEXT)',
+            5: 'f.away_team_name',
+            6: '(SELECT odd FROM alldownloadoddmapping WHERE fixture_id = f.id AND bookmaker_name = "Bet365" AND bet_value = "Home" LIMIT 1)',
+            7: '(SELECT odd FROM alldownloadoddmapping WHERE fixture_id = f.id AND bookmaker_name = "Bet365" AND bet_value = "Draw" LIMIT 1)',
+            8: '(SELECT odd FROM alldownloadoddmapping WHERE fixture_id = f.id AND bookmaker_name = "Bet365" AND bet_value = "Away" LIMIT 1)',
+            9: '(SELECT odd FROM alldownloadoddmapping WHERE fixture_id = f.id AND bookmaker_name = "1xBet" AND bet_value = "Home" LIMIT 1)',
+            10: '(SELECT odd FROM alldownloadoddmapping WHERE fixture_id = f.id AND bookmaker_name = "1xBet" AND bet_value = "Draw" LIMIT 1)',
+            11: '(SELECT odd FROM alldownloadoddmapping WHERE fixture_id = f.id AND bookmaker_name = "1xBet" AND bet_value = "Away" LIMIT 1)',
+            12: 'COALESCE(m.home_pr, 0)',
+            13: 'COALESCE(m.away_pr, 0)',
+            14: 'COALESCE(m.pr_diff, 0)'
+        }
+
+        # Rendezési oszlop kiválasztása
+        order_by = columns.get(order_column, 'f.date')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Keresési feltételek összeállítása
+        search_conditions = []
+        params = []
+
+        # Jövőbeli mérkőzések szűrése
+        if future_only:
+            search_conditions.append('CAST(strftime("%s", f.date) AS INTEGER) >= ?')
+            params.append(current_timestamp)
+            logger.debug("Jövőbeli mérkőzések szűrési feltétel hozzáadva")
+
+        # Oszloponkénti szűrés
+        for i in range(15):  # 15 oszlop
+            column_search = request.args.get(f'columns[{i}][search][value]', '')
+            if column_search:
+                logger.debug(f"Szűrés a(z) {i}. oszlopra: {column_search}")
+                
+                if i == 4:  # Eredmény oszlop
+                    score_parts = column_search.replace(' ', '').split('-')
+                    if len(score_parts) == 2:
+                        if score_parts[0].isdigit() and score_parts[1].isdigit():
+                            search_conditions.append('(f.goals_home = ? AND f.goals_away = ?)')
+                            params.extend([int(score_parts[0]), int(score_parts[1])])
+                        elif score_parts[0].isdigit():
+                            search_conditions.append('f.goals_home = ?')
+                            params.append(int(score_parts[0]))
+                        elif score_parts[1].isdigit():
+                            search_conditions.append('f.goals_away = ?')
+                            params.append(int(score_parts[1]))
+                    elif column_search.isdigit():  # Ha csak egy számot írtak be
+                        search_conditions.append('(f.goals_home = ? OR f.goals_away = ?)')
+                        params.extend([int(column_search), int(column_search)])
+                elif i == 6:  # Fogadóiroda oszlop
+                    search_conditions.append('''
+                        EXISTS (
+                            SELECT 1 
+                            FROM alldownloadoddmapping a 
+                            WHERE a.fixture_id = f.id 
+                            AND (
+                                LOWER(a.bookmaker_name) LIKE LOWER(?) 
+                                OR LOWER(a.bet_value) LIKE LOWER(?)
+                                OR CAST(a.odd AS TEXT) LIKE ?
+                            )
+                        )
+                    ''')
+                    search_param = f"%{column_search}%"
+                    params.extend([search_param] * 3)
+                else:
+                    column = columns.get(i)
+                    if column:
+                        search_conditions.append(f'LOWER({column}) LIKE LOWER(?)')
+                        params.append(f"%{column_search}%")
+
+        # Add filtering for Home, Draw, and Away odds
+        min_bet365_home = request.args.get('min_bet365_home', type=float)
+        max_bet365_home = request.args.get('max_bet365_home', type=float)
+        if min_bet365_home is not None or max_bet365_home is not None:
+            search_conditions.append('''
+                EXISTS (
+                    SELECT 1 FROM alldownloadoddmapping a 
+                    WHERE a.fixture_id = f.id 
+                    AND a.bookmaker_name = 'Bet365'
+                    AND a.bet_value = 'Home'
+                    AND a.odd >= COALESCE(?, 0)
+                    AND a.odd <= COALESCE(?, 999999)
+                )
+            ''')
+            params.extend([min_bet365_home if min_bet365_home is not None else 0,
+                         max_bet365_home if max_bet365_home is not None else 999999])
+
+        min_bet365_draw = request.args.get('min_bet365_draw', type=float)
+        max_bet365_draw = request.args.get('max_bet365_draw', type=float)
+        if min_bet365_draw is not None or max_bet365_draw is not None:
+            search_conditions.append('''
+                EXISTS (
+                    SELECT 1 FROM alldownloadoddmapping a 
+                    WHERE a.fixture_id = f.id 
+                    AND a.bookmaker_name = 'Bet365'
+                    AND a.bet_value = 'Draw'
+                    AND a.odd >= COALESCE(?, 0)
+                    AND a.odd <= COALESCE(?, 999999)
+                )
+            ''')
+            params.extend([min_bet365_draw if min_bet365_draw is not None else 0,
+                         max_bet365_draw if max_bet365_draw is not None else 999999])
+
+        min_bet365_away = request.args.get('min_bet365_away', type=float)
+        max_bet365_away = request.args.get('max_bet365_away', type=float)
+        if min_bet365_away is not None or max_bet365_away is not None:
+            search_conditions.append('''
+                EXISTS (
+                    SELECT 1 FROM alldownloadoddmapping a 
+                    WHERE a.fixture_id = f.id 
+                    AND a.bookmaker_name = 'Bet365'
+                    AND a.bet_value = 'Away'
+                    AND a.odd >= COALESCE(?, 0)
+                    AND a.odd <= COALESCE(?, 999999)
+                )
+            ''')
+            params.extend([min_bet365_away if min_bet365_away is not None else 0,
+                         max_bet365_away if max_bet365_away is not None else 999999])
+
+        min_1xbet_home = request.args.get('min_1xbet_home', type=float)
+        max_1xbet_home = request.args.get('max_1xbet_home', type=float)
+        if min_1xbet_home is not None or max_1xbet_home is not None:
+            search_conditions.append('''
+                EXISTS (
+                    SELECT 1 FROM alldownloadoddmapping a 
+                    WHERE a.fixture_id = f.id 
+                    AND a.bookmaker_name = '1xBet'
+                    AND a.bet_value = 'Home'
+                    AND a.odd >= COALESCE(?, 0)
+                    AND a.odd <= COALESCE(?, 999999)
+                )
+            ''')
+            params.extend([min_1xbet_home if min_1xbet_home is not None else 0,
+                         max_1xbet_home if max_1xbet_home is not None else 999999])
+
+        min_1xbet_draw = request.args.get('min_1xbet_draw', type=float)
+        max_1xbet_draw = request.args.get('max_1xbet_draw', type=float)
+        if min_1xbet_draw is not None or max_1xbet_draw is not None:
+            search_conditions.append('''
+                EXISTS (
+                    SELECT 1 FROM alldownloadoddmapping a 
+                    WHERE a.fixture_id = f.id 
+                    AND a.bookmaker_name = '1xBet'
+                    AND a.bet_value = 'Draw'
+                    AND a.odd >= COALESCE(?, 0)
+                    AND a.odd <= COALESCE(?, 999999)
+                )
+            ''')
+            params.extend([min_1xbet_draw if min_1xbet_draw is not None else 0,
+                         max_1xbet_draw if max_1xbet_draw is not None else 999999])
+
+        min_1xbet_away = request.args.get('min_1xbet_away', type=float)
+        max_1xbet_away = request.args.get('max_1xbet_away', type=float)
+        if min_1xbet_away is not None or max_1xbet_away is not None:
+            search_conditions.append('''
+                EXISTS (
+                    SELECT 1 FROM alldownloadoddmapping a 
+                    WHERE a.fixture_id = f.id 
+                    AND a.bookmaker_name = '1xBet'
+                    AND a.bet_value = 'Away'
+                    AND a.odd >= COALESCE(?, 0)
+                    AND a.odd <= COALESCE(?, 999999)
+                )
+            ''')
+            params.extend([min_1xbet_away if min_1xbet_away is not None else 0,
+                         max_1xbet_away if max_1xbet_away is not None else 999999])
+
+        # WHERE feltétel összeállítása
+        where_clause = ''
+        if search_conditions:
+            where_clause = 'WHERE ' + ' AND '.join(search_conditions)
+            logger.debug(f"WHERE feltétel: {where_clause}")
+            logger.debug(f"Paraméterek: {params}")
+
+        # Összes rekord számának lekérdezése
+        base_count_query = '''
+            SELECT COUNT(DISTINCT f.id) 
+            FROM fixtures f
+            LEFT JOIN match_pr_data_this_season m ON f.id = m.fixture_id
+        '''
+        if future_only:
+            base_count_query += ' WHERE CAST(strftime("%s", f.date) AS INTEGER) >= ?'
+            cursor.execute(base_count_query, [current_timestamp])
+        else:
+            cursor.execute(base_count_query)
+        total_records = cursor.fetchone()[0]
+        
+        logger.debug(f"Összes rekord száma: {total_records}")
+
+        # Szűrt rekordok számának lekérdezése
+        filtered_query = f"""
+            SELECT COUNT(DISTINCT f.id)
+            FROM fixtures f
+            LEFT JOIN match_pr_data_this_season m ON f.id = m.fixture_id
+            {where_clause}
+        """
+        cursor.execute(filtered_query, params)
+        filtered_records = cursor.fetchone()[0]
+
+        # Alap SQL lekérdezés
+        base_query = '''
+            SELECT 
+                f.*,
+                m.home_pr,
+                m.away_pr,
+                m.pr_diff,
+                (
+                    SELECT json_group_array(
+                        json_object(
+                            'bookmaker_name', bookmaker_name,
+                            'bet_value', bet_value,
+                            'odd', odd
+                        )
+                    )
+                    FROM alldownloadoddmapping
+                    WHERE fixture_id = f.id
+                ) as odds
+            FROM fixtures f
+            LEFT JOIN match_pr_data_this_season m ON f.id = m.fixture_id
+        '''
+
+        # Adatok lekérdezése lapozással és rendezéssel
+        query = f"""
+            {base_query}
+            {where_clause}
+            ORDER BY {order_by} {order_dir} NULLS LAST
+            LIMIT ? OFFSET ?
+        """
+        logger.debug(f"Végső lekérdezés: {query}")
+        
+        cursor.execute(query, params + [length, start])
+        matches = cursor.fetchall()
+
+        # Odds adatok lekérdezése
+        match_data = []
+        for match in matches:
+            fixture_id = match['id']
+            
+            # Dátum formázása
+            match_dict = dict(match)
+            try:
+                match_dict['date'] = datetime.fromisoformat(match['date']).strftime('%Y-%m-%d %H:%M')
+            except:
+                match_dict['date'] = match['date']
+            
+            # Odds adatok lekérdezése az alldownloadoddmapping táblából
+            cursor.execute('''
+                SELECT 
+                    bookmaker_id,
+                    bookmaker_name,
+                    bet_value,
+                    odd,
+                    update_time,
+                    fixture_timestamp
+                FROM alldownloadoddmapping 
+                WHERE fixture_id = ?
+                ORDER BY bookmaker_name, bet_value
+            ''', (fixture_id,))
+            odds = cursor.fetchall()
+            
+            odds_list = []
+            for odd in odds:
+                odds_list.append({
+                    'bookmaker_id': odd['bookmaker_id'],
+                    'bookmaker_name': odd['bookmaker_name'],
+                    'bet_value': odd['bet_value'],
+                    'odd': float(odd['odd']),
+                    'update_time': odd['update_time'],
+                    'fixture_timestamp': odd['fixture_timestamp'],
+                    'fixture_id': fixture_id
+                })
+
+            match_dict['odds'] = odds_list
+            match_data.append(match_dict)
+
+        response = {
+            'draw': draw,
+            'recordsTotal': total_records,
+            'recordsFiltered': filtered_records,
+            'data': match_data
+        }
+
+        logger.debug(f"Első mérkőzés odds adatai: {match_data[0]['odds'] if match_data else 'Nincs adat'}")
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Hiba történt: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'draw': draw if 'draw' in locals() else None,
+            'recordsTotal': 0,
+            'recordsFiltered': 0,
+            'data': []
+        }), 500
+
+@app.route('/api/odds_history')
+def get_odds_history():
+    try:
+        fixture_id = request.args.get('fixture_id')
+        bookmaker_name = request.args.get('bookmaker_name')
+        
+        if not fixture_id or not bookmaker_name:
+            return jsonify({'error': 'Hiányzó paraméterek'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Először lekérjük a bookmaker_id-t a név alapján
+        cursor.execute('''
+            SELECT DISTINCT bookmaker_id 
+            FROM alldownloadoddmapping 
+            WHERE bookmaker_name = ?
+        ''', (bookmaker_name,))
+        
+        result = cursor.fetchone()
+        if not result:
+            return jsonify({'error': 'Nem található fogadóiroda'}), 404
+            
+        bookmaker_id = result['bookmaker_id']
+        
+        # Odds történet lekérdezése az alldownloadoddmapping táblából
+        cursor.execute('''
+            SELECT DISTINCT
+                CAST(strftime('%s', update_time) AS INTEGER) as timestamp,
+                bet_value,
+                odd,
+                'current' as source
+            FROM alldownloadoddmapping
+            WHERE fixture_id = ?
+            AND bookmaker_id = ?
+            AND bet_value IN ('Home', 'Draw', 'Away')
+            ORDER BY timestamp ASC
+        ''', (fixture_id, bookmaker_id))
+        
+        current_odds = cursor.fetchall()
+        
+        # Odds történet lekérdezése az odds_history táblából
+        cursor.execute('''
+            SELECT DISTINCT
+                CAST(strftime('%s', update_time) AS INTEGER) as timestamp,
+                bet_value,
+                odd,
+                'history' as source
+            FROM odds_history
+            WHERE fixture_id = ?
+            AND bookmaker_id = ?
+            AND bet_value IN ('Home', 'Draw', 'Away')
+            ORDER BY timestamp ASC
+        ''', (fixture_id, bookmaker_id))
+        
+        history_odds = cursor.fetchall()
+        
+        # Adatok összefűzése és rendezése típus szerint
+        odds_by_type = {
+            'Home': [],
+            'Draw': [],
+            'Away': []
+        }
+        
+        # Aktuális odds-ok feldolgozása
+        for odd in current_odds:
+            bet_type = odd['bet_value']
+            if bet_type in odds_by_type:
+                odds_by_type[bet_type].append({
+                    'update_time': odd['timestamp'],
+                    'odd': float(odd['odd']),
+                    'source': odd['source']
+                })
+        
+        # Történeti odds-ok feldolgozása
+        for odd in history_odds:
+            bet_type = odd['bet_value']
+            if bet_type in odds_by_type:
+                odds_by_type[bet_type].append({
+                    'update_time': odd['timestamp'],
+                    'odd': float(odd['odd']),
+                    'source': odd['source']
+                })
+        
+        # Rendezés időbélyeg szerint minden típusnál
+        for bet_type in odds_by_type:
+            odds_by_type[bet_type].sort(key=lambda x: x['update_time'])
+        
+        logger.debug(f"Odds történet: {sum(len(odds) for odds in odds_by_type.values())} rekord")
+        logger.debug(f"Home: {len(odds_by_type['Home'])}, Draw: {len(odds_by_type['Draw'])}, Away: {len(odds_by_type['Away'])}")
+        
+        return jsonify(odds_by_type)
+        
+    except Exception as e:
+        logger.error(f"Hiba az odds történet lekérdezésekor: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pr-helper-matches')
+def get_pr_helper_matches():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        bet_type = request.args.get('type', '')  # home, draw, vagy away
+        pr_diff = request.args.get('pr_diff', type=float)
+        odd_value = request.args.get('odd_value', type=float)
+
+        if not bet_type or pr_diff is None or odd_value is None:
+            return jsonify({'error': 'Hiányzó paraméterek'}), 400
+
+        # Megfelelő tábla kiválasztása
+        if bet_type == 'home':
+            table = 'pr_helper_home_matches_this_season'
+            stats_table = 'pr_helper_home_odd_this_season'
+        elif bet_type == 'draw':
+            table = 'pr_helper_draw_matches_this_season'
+            stats_table = 'pr_helper_draw_odd_this_season'
+        elif bet_type == 'away':
+            table = 'pr_helper_away_matches_this_season'
+            stats_table = 'pr_helper_away_odd_this_season'
+        else:
+            return jsonify({'error': 'Érvénytelen típus'}), 400
+
+        # Mérkőzések lekérése
+        cursor.execute(f'''
+            SELECT 
+                m.*,
+                h.odd as home_odd,
+                d.odd as draw_odd,
+                a.odd as away_odd
+            FROM {table} m
+            JOIN {stats_table} s ON m.stat_id = s.id
+            LEFT JOIN alldownloadoddmapping h ON m.fixture_id = h.fixture_id 
+                AND h.bookmaker_id = '11' AND h.bet_value = 'Home'
+            LEFT JOIN alldownloadoddmapping d ON m.fixture_id = d.fixture_id 
+                AND d.bookmaker_id = '11' AND d.bet_value = 'Draw'
+            LEFT JOIN alldownloadoddmapping a ON m.fixture_id = a.fixture_id 
+                AND a.bookmaker_id = '11' AND a.bet_value = 'Away'
+            WHERE s.pr_diff = ? AND s.odd_value = ?
+            ORDER BY m.date DESC
+        ''', (pr_diff, odd_value))
+
+        matches = []
+        for row in cursor.fetchall():
+            matches.append({
+                'fixture_id': row[1],
+                'date': row[2],
+                'home_team': row[3],
+                'away_team': row[4],
+                'score': row[5],
+                'pr_diff': row[6],
+                'odd_value': row[7],
+                'home_odd': row[8],
+                'draw_odd': row[9],
+                'away_odd': row[10]
+            })
+
+        return jsonify({'matches': matches})
+
+    except Exception as e:
+        logger.error(f"Hiba a mérkőzések lekérésekor: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/pr-helper')
+def pr_helper():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Home adatok lekérése
+        cursor.execute('''
+            SELECT pr_diff, odd_value, total_matches, win_count, lose_count, win_percentage, lose_percentage 
+            FROM pr_helper_home_odd_this_season 
+            ORDER BY pr_diff
+        ''')
+        home_data = cursor.fetchall()
+        cursor.execute('SELECT SUM(total_matches) FROM pr_helper_home_odd_this_season')
+        home_total_matches = cursor.fetchone()[0] or 0
+
+        # Draw adatok lekérése
+        cursor.execute('''
+            SELECT pr_diff, odd_value, total_matches, win_count, lose_count, win_percentage, lose_percentage 
+            FROM pr_helper_draw_odd_this_season 
+            ORDER BY pr_diff
+        ''')
+        draw_data = cursor.fetchall()
+        cursor.execute('SELECT SUM(total_matches) FROM pr_helper_draw_odd_this_season')
+        draw_total_matches = cursor.fetchone()[0] or 0
+
+        # Away adatok lekérése
+        cursor.execute('''
+            SELECT pr_diff, odd_value, total_matches, win_count, lose_count, win_percentage, lose_percentage 
+            FROM pr_helper_away_odd_this_season 
+            ORDER BY pr_diff
+        ''')
+        away_data = cursor.fetchall()
+        cursor.execute('SELECT SUM(total_matches) FROM pr_helper_away_odd_this_season')
+        away_total_matches = cursor.fetchone()[0] or 0
+
+        return render_template('pr_helper.html', 
+                             home_data=home_data,
+                             draw_data=draw_data,
+                             away_data=away_data,
+                             home_total_matches=home_total_matches,
+                             draw_total_matches=draw_total_matches,
+                             away_total_matches=away_total_matches)
+    except Exception as e:
+        logger.error(f"Hiba a PR helper adatok lekérésekor: {str(e)}")
+        return "Hiba történt az adatok lekérésekor", 500
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/matches')
+def matches():
+    return render_template('matches.html')
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)

@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mérkőzések és Odds Adatok</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        .match-row {
+            background-color: #f8f9fa;
+        }
+        .odds-row {
+            background-color: #ffffff;
+        }
+        .table-hover tbody tr:hover {
+            background-color: rgba(0,0,0,.075);
+        }
+        .score {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        .date-col {
+            white-space: nowrap;
+        }
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 20px;
+            border-radius: 5px;
+            display: none;
+        }
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+            margin: 0 10px;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #2196F3;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+        .toggle-label {
+            font-weight: 500;
+            color: #495057;
+        }
+        .column-filter {
+            width: 80px;
+            padding: 5px;
+            margin: 2px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
+            display: inline-block;
+        }
+        .column-filter:focus {
+            outline: none;
+            border-color: #80bdff;
+            box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+        }
+        thead th {
+            position: relative;
+            background-color: #343a40;
+            color: white;
+            font-size: 0.9em;
+            white-space: nowrap;
+        }
+        .filters th {
+            padding: 8px;
+            background-color: #f8f9fa;
+            border-bottom: none;
+        }
+        .dataTables_filter, .dataTables_info {
+            display: none;
+        }
+        .dataTables_processing {
+            background-color: rgba(255, 255, 255, 0.9) !important;
+            color: #333 !important;
+            border: none !important;
+            border-radius: 4px !important;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
+        }
+        .odds-value {
+            font-weight: bold;
+            color: #0056b3;
+        }
+        .show-all-odds {
+            padding: 4px 8px;
+            font-size: 0.9em;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .show-all-odds:hover {
+            background-color: #0056b3;
+        }
+        .odds-cell {
+            text-align: center;
+            font-weight: bold;
+            color: #0056b3;
+        }
+        .bookmaker-header {
+            text-align: center;
+            background-color: #e9ecef;
+            padding: 5px;
+            font-weight: bold;
+            border-bottom: 2px solid #dee2e6;
+        }
+        .modal-odds-table {
+            width: 100%;
+            margin-top: 10px;
+        }
+        .modal-odds-table th {
+            background-color: #f8f9fa;
+            text-align: center;
+            font-weight: bold;
+        }
+        .modal-odds-table td {
+            text-align: center;
+        }
+        .modal-odds-value {
+            font-weight: bold;
+            color: #0056b3;
+        }
+        #oddsModal .modal-content {
+            width: 90%;
+            max-width: 1200px;
+            margin: 30px auto;
+        }
+        #oddsChart {
+            width: 100%;
+            height: 400px;
+            margin-bottom: 20px;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.4);
+            padding-top: 60px;
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 90%;
+            max-width: 1200px;
+            position: relative;
+        }
+
+        .close {
+            position: absolute;
+            right: 25px;
+            top: 10px;
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        #oddsTable tbody tr {
+            cursor: pointer;
+        }
+
+        #oddsTable tbody tr:hover {
+            background-color: #f5f5f5;
+        }
+
+        #oddsTable tbody tr.active {
+            background-color: #e0e0e0;
+        }
+        .navbar {
+            background-color: #343a40;
+            box-shadow: 0 2px 4px rgba(0,0,0,.1);
+            margin-bottom: 20px;
+        }
+        .navbar-brand {
+            color: #fff !important;
+            font-weight: bold;
+        }
+        .nav-link {
+            color: rgba(255,255,255,.8) !important;
+            transition: color 0.3s ease;
+        }
+        .nav-link:hover {
+            color: #fff !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigációs menü -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">Football Analyzer</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/"><i class="bi bi-arrow-left"></i> Vissza a főoldalra</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <h2 class="mb-4">Mérkőzések és Odds Adatok</h2>
+        
+        <!-- Toggle switch hozzáadása -->
+        <div class="toggle-container">
+            <span class="toggle-label">Összes mérkőzés</span>
+            <label class="toggle-switch">
+                <input type="checkbox" id="matchFilter">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label">Csak jövőbeli mérkőzések</span>
+        </div>
+
+        <div class="loading">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Betöltés...</span>
+            </div>
+            <div class="mt-2">Adatok betöltése...</div>
+        </div>
+        <div class="table-responsive">
+            <table id="matchesTable" class="table table-hover">
+                <thead>
+                    <tr>
+                        <th rowspan="2">Dátum</th>
+                        <th rowspan="2">Ország</th>
+                        <th rowspan="2">Liga</th>
+                        <th rowspan="2">Hazai</th>
+                        <th rowspan="2">Eredmény</th>
+                        <th rowspan="2">Vendég</th>
+                        <th>Home PR</th>
+                        <th>Away PR</th>
+                        <th>PR Diff</th>
+                        <th colspan="3" class="text-center">Bet365</th>
+                        <th colspan="3" class="text-center">1xBet</th>
+                        <th rowspan="2">További odds</th>
+                    </tr>
+                    <tr>
+                        <th></th>
+                        <th></th>
+                        <th></th>
+                        <th>Home</th>
+                        <th>Draw</th>
+                        <th>Away</th>
+                        <th>Home</th>
+                        <th>Draw</th>
+                        <th>Away</th>
+                    </tr>
+                    <tr class="filters">
+                        <th><input type="search" class="column-filter" data-column="0" placeholder="Dátum"></th>
+                        <th><input type="text" class="column-filter" data-column="1" placeholder="Ország"></th>
+                        <th><input type="text" class="column-filter" data-column="2" placeholder="Liga"></th>
+                        <th><input type="text" class="column-filter" data-column="3" placeholder="Hazai"></th>
+                        <th><input type="text" class="column-filter" data-column="4" placeholder="Eredmény"></th>
+                        <th><input type="text" class="column-filter" data-column="5" placeholder="Vendég"></th>
+                        <th></th>
+                        <th></th>
+                        <th></th>
+                        <th><input type="text" class="column-filter min" placeholder="Min" id="min-bet365-home"><input type="text" class="column-filter max" placeholder="Max" id="max-bet365-home"></th>
+                        <th><input type="text" class="column-filter min" placeholder="Min" id="min-bet365-draw"><input type="text" class="column-filter max" placeholder="Max" id="max-bet365-draw"></th>
+                        <th><input type="text" class="column-filter min" placeholder="Min" id="min-bet365-away"><input type="text" class="column-filter max" placeholder="Max" id="max-bet365-away"></th>
+                        <th><input type="text" class="column-filter min" placeholder="Min" id="min-1xbet-home"><input type="text" class="column-filter max" placeholder="Max" id="max-1xbet-home"></th>
+                        <th><input type="text" class="column-filter min" placeholder="Min" id="min-1xbet-draw"><input type="text" class="column-filter max" placeholder="Max" id="max-1xbet-draw"></th>
+                        <th><input type="text" class="column-filter min" placeholder="Min" id="min-1xbet-away"><input type="text" class="column-filter max" placeholder="Max" id="max-1xbet-away"></th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Odds Modal -->
+    <div id="oddsModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Odds Történet</h2>
+            <div id="oddsChart"></div>
+            <table id="oddsTable" class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Fogadóiroda</th>
+                        <th>Home</th>
+                        <th>Draw</th>
+                        <th>Away</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            // Debug mód bekapcsolása
+            $.fn.dataTable.ext.errMode = 'throw';
+            
+            var loading = $('.loading');
+            var searchDelay = null;
+            var lastMinValue = new Array(12).fill('');
+            var lastMaxValue = new Array(12).fill('');
+            var showFutureOnly = false;  // Alapértelmezetten minden mérkőzés
+            
+            // Globális változó a szűrők értékeinek tárolásához
+            var filterValues = {};
+
+            // Globális változók módosítása
+            var oddsColumns = {
+                'bet365-home': 8,
+                'bet365-draw': 9,
+                'bet365-away': 10,
+                '1xbet-home': 11,
+                '1xbet-draw': 12,
+                '1xbet-away': 13
+            };
+
+            // Toggle switch eseménykezelő
+            $('#matchFilter').on('change', function() {
+                showFutureOnly = $(this).prop('checked');
+                table.ajax.reload();
+            });
+            
+            // Modal inicializálása
+            var oddsModal = new bootstrap.Modal(document.getElementById('oddsModal'));
+            
+            // DataTable inicializálása
+            var table = $('#matchesTable').DataTable({
+                processing: true,
+                serverSide: true,
+                searching: false,
+                ordering: true,
+                pageLength: 25,
+                stateSave: true,
+                stateLoadParams: function(settings, data) {
+                    // Szűrők visszaállítása az előző állapotból
+                    if (data.filterValues) {
+                        filterValues = data.filterValues;
+                        // Szűrők értékeinek visszaállítása
+                        Object.keys(filterValues).forEach(function(key) {
+                            var [column, type] = key.split('-');
+                            $('.column-filter.' + type + '[data-column="' + column + '"]').val(filterValues[key]);
+                        });
+                    }
+                },
+                stateSaveParams: function(settings, data) {
+                    // Szűrők mentése az állapotba
+                    data.filterValues = filterValues;
+                },
+                ajax: {
+                    url: '/api/matches',
+                    type: 'GET',
+                    data: function(d) {
+                        // Oszlopszűrők hozzáadása
+                        $('.column-filter').each(function() {
+                            var columnIndex = $(this).data('column');
+                            d.columns = d.columns || {};
+                            d.columns[columnIndex] = {
+                                search: {
+                                    value: $(this).val(),
+                                    regex: false
+                                }
+                            };
+                        });
+                        // Add min and max filters for Home, Draw, and Away
+                        d.min_bet365_home = $('#min-bet365-home').val();
+                        d.max_bet365_home = $('#max-bet365-home').val();
+                        d.min_bet365_draw = $('#min-bet365-draw').val();
+                        d.max_bet365_draw = $('#max-bet365-draw').val();
+                        d.min_bet365_away = $('#min-bet365-away').val();
+                        d.max_bet365_away = $('#max-bet365-away').val();
+                        d.min_1xbet_home = $('#min-1xbet-home').val();
+                        d.max_1xbet_home = $('#max-1xbet-home').val();
+                        d.min_1xbet_draw = $('#min-1xbet-draw').val();
+                        d.max_1xbet_draw = $('#max-1xbet-draw').val();
+                        d.min_1xbet_away = $('#min-1xbet-away').val();
+                        d.max_1xbet_away = $('#max-1xbet-away').val();
+                        
+                        // Hozzáadjuk a jövőbeli mérkőzések szűrőt
+                        d.future_only = showFutureOnly;
+                        
+                        return d;
+                    },
+                    beforeSend: function() {
+                        loading.show();
+                    },
+                    complete: function() {
+                        loading.hide();
+                    },
+                    dataSrc: function(json) {
+                        // Debug log
+                        console.log('Kapott válasz:', json);
+                        return json.data;
+                    }
+                },
+                columns: [
+                    { 
+                        data: 'date',
+                        orderable: true
+                    },
+                    { 
+                        data: 'league_country',
+                        orderable: true
+                    },
+                    { 
+                        data: 'league_name',
+                        orderable: true
+                    },
+                    { 
+                        data: 'home_team_name',
+                        orderable: true
+                    },
+                    { 
+                        data: null,
+                        orderable: true,
+                        render: function(data, type, row) {
+                            if (data.goals_home !== null && data.goals_away !== null) {
+                                return data.goals_home + ' - ' + data.goals_away;
+                            }
+                            return '- : -';
+                        }
+                    },
+                    { 
+                        data: 'away_team_name',
+                        orderable: true
+                    },
+                    { // Home PR
+                        data: 'home_pr',
+                        orderable: true,
+                        className: 'text-center',
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return data ? data.toFixed(2) : '0.00';
+                            }
+                            return data;
+                        }
+                    },
+                    { // Away PR
+                        data: 'away_pr',
+                        orderable: true,
+                        className: 'text-center',
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return data ? data.toFixed(2) : '0.00';
+                            }
+                            return data;
+                        }
+                    },
+                    { // PR Diff
+                        data: 'pr_diff',
+                        orderable: true,
+                        className: 'text-center',
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                if (!data) return '0.00';
+                                var value = parseFloat(data);
+                                var color = value > 0 ? 'text-success' : value < 0 ? 'text-danger' : '';
+                                return '<span class="' + color + '">' + value.toFixed(2) + '</span>';
+                            }
+                            return data;
+                        }
+                    },
+                    { // Bet365 Home
+                        data: 'odds',
+                        orderable: true,
+                        className: 'odds-cell',
+                        render: function(data, type, row) {
+                            let odd = data.find(o => o.bookmaker_name === 'Bet365' && o.bet_value === 'Home');
+                            if (type === 'sort') {
+                                return odd ? odd.odd : -1;
+                            }
+                            return odd ? odd.odd.toFixed(2) : '-';
+                        }
+                    },
+                    { // Bet365 Draw
+                        data: 'odds',
+                        orderable: true,
+                        className: 'odds-cell',
+                        render: function(data, type, row) {
+                            let odd = data.find(o => o.bookmaker_name === 'Bet365' && o.bet_value === 'Draw');
+                            if (type === 'sort') {
+                                return odd ? odd.odd : -1;
+                            }
+                            return odd ? odd.odd.toFixed(2) : '-';
+                        }
+                    },
+                    { // Bet365 Away
+                        data: 'odds',
+                        orderable: true,
+                        className: 'odds-cell',
+                        render: function(data, type, row) {
+                            let odd = data.find(o => o.bookmaker_name === 'Bet365' && o.bet_value === 'Away');
+                            if (type === 'sort') {
+                                return odd ? odd.odd : -1;
+                            }
+                            return odd ? odd.odd.toFixed(2) : '-';
+                        }
+                    },
+                    { // 1xBet Home
+                        data: 'odds',
+                        orderable: true,
+                        className: 'odds-cell',
+                        render: function(data, type, row) {
+                            let odd = data.find(o => o.bookmaker_name === '1xBet' && o.bet_value === 'Home');
+                            if (type === 'sort') {
+                                return odd ? odd.odd : -1;
+                            }
+                            return odd ? odd.odd.toFixed(2) : '-';
+                        }
+                    },
+                    { // 1xBet Draw
+                        data: 'odds',
+                        orderable: true,
+                        className: 'odds-cell',
+                        render: function(data, type, row) {
+                            let odd = data.find(o => o.bookmaker_name === '1xBet' && o.bet_value === 'Draw');
+                            if (type === 'sort') {
+                                return odd ? odd.odd : -1;
+                            }
+                            return odd ? odd.odd.toFixed(2) : '-';
+                        }
+                    },
+                    { // 1xBet Away
+                        data: 'odds',
+                        orderable: true,
+                        className: 'odds-cell',
+                        render: function(data, type, row) {
+                            let odd = data.find(o => o.bookmaker_name === '1xBet' && o.bet_value === 'Away');
+                            if (type === 'sort') {
+                                return odd ? odd.odd : -1;
+                            }
+                            return odd ? odd.odd.toFixed(2) : '-';
+                        }
+                    },
+                    { // További odds gomb
+                        data: 'odds',
+                        orderable: false,
+                        className: 'text-center',
+                        render: function(data, type, row) {
+                            if (!data || !Array.isArray(data) || data.length === 0) {
+                                return '-';
+                            }
+                            const oddsStr = JSON.stringify(data).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                            return `<button type="button" class="btn btn-primary btn-sm" onclick="showAllOdds(${oddsStr})">További</button>`;
+                        }
+                    }
+                ],
+                language: {
+                    url: "https://cdn.datatables.net/plug-ins/1.13.7/i18n/hu.json",
+                    processing: "Adatok betöltése...",
+                    zeroRecords: "Nincs találat",
+                    emptyTable: "Nincs adat",
+                    info: "_TOTAL_ találatból _START_ - _END_ megjelenítése",
+                    infoEmpty: "Nincs megjeleníthető adat",
+                    infoFiltered: "(_MAX_ találatból szűrve)",
+                    search: "Keresés:",
+                    lengthMenu: "_MENU_ sor/oldal",
+                    paginate: {
+                        first: "Első",
+                        previous: "Előző",
+                        next: "Következő",
+                        last: "Utolsó"
+                    }
+                },
+                drawCallback: function(settings) {
+                    // Debug információk
+                    console.log('Tábla frissítve:', settings);
+                    
+                    // Oszlopszűrők értékeinek visszaállítása
+                    $('.column-filter').each(function() {
+                        var column = $(this).data('column');
+                        var isMin = $(this).hasClass('min');
+                        var inputId = $(this).attr('id');
+                        
+                        // Odds oszlopok speciális kezelése
+                        if (inputId) {
+                            var matches = inputId.match(/(min|max)-(bet365|1xbet)-(home|draw|away)/);
+                            if (matches) {
+                                var bookmaker = matches[2];
+                                var type = matches[3];
+                                column = oddsColumns[bookmaker + '-' + type];
+                            }
+                        }
+                        
+                        // A megfelelő tömbből állítjuk vissza az értéket
+                        if (isMin) {
+                            if (lastMinValue[column] !== undefined) {
+                                $(this).val(lastMinValue[column]);
+                            }
+                        } else {
+                            if (lastMaxValue[column] !== undefined) {
+                                $(this).val(lastMaxValue[column]);
+                            }
+                        }
+                    });
+
+                    // Min-max mezők értékeinek megőrzése
+                    $('.column-filter[id^="min-"], .column-filter[id^="max-"]').each(function() {
+                        var currentValue = $(this).val();
+                        if (currentValue) {
+                            $(this).val(currentValue);
+                        }
+                    });
+                }
+            });
+
+            // Oszlopszűrők kezelése
+            var filterTimeout;
+            $('.column-filter').on('input', function(e) {
+                var column = $(this).data('column');
+                var value = this.value;
+                var isMin = $(this).hasClass('min');
+                var inputId = $(this).attr('id');
+                
+                // Odds oszlopok speciális kezelése
+                if (inputId) {
+                    var matches = inputId.match(/(min|max)-(bet365|1xbet)-(home|draw|away)/);
+                    if (matches) {
+                        var bookmaker = matches[2];
+                        var type = matches[3];
+                        column = oddsColumns[bookmaker + '-' + type];
+                    }
+                }
+
+                // Érték mentése a megfelelő tömbbe
+                if (isMin) {
+                    lastMinValue[column] = value;
+                } else {
+                    lastMaxValue[column] = value;
+                }
+
+                clearTimeout(filterTimeout);
+                filterTimeout = setTimeout(function() {
+                    // Speciális kezelés az odds oszlopokhoz (6-11)
+                    if (column >= 6 && column <= 11) {
+                        $.fn.dataTable.ext.search.push(function(settings, data, dataIndex) {
+                            var value = parseFloat(data[column].replace(/[^\d.-]/g, ''));
+                            var min = parseFloat(lastMinValue[column]);
+                            var max = parseFloat(lastMaxValue[column]);
+
+                            if (isNaN(value) || 
+                                (isNaN(min) && isNaN(max)) ||
+                                (isNaN(min) && value <= max) ||
+                                (min <= value && isNaN(max)) ||
+                                (min <= value && value <= max)) {
+                                return true;
+                            }
+                            return false;
+                        });
+                    } 
+                    // Speciális kezelés az "Ország", "Liga", "Hazai" és "Vendég" oszlopokhoz
+                    else if (column === 1 || column === 2 || column === 4 || column === 5) {
+                        var searchValue = {
+                            min: lastMinValue[column],
+                            max: lastMaxValue[column]
+                        };
+
+                        $.fn.dataTable.ext.search.push(function(settings, data, dataIndex) {
+                            var cellValue = data[column];
+                            
+                            // Ha van numerikus érték a cellában, azt is figyelembe vesszük
+                            var numericValue = parseFloat(cellValue.replace(/[^\d.-]/g, ''));
+                            
+                            // Szöveges keresés
+                            var textMatch = true;
+                            if (searchValue.min && searchValue.min.length > 0) {
+                                textMatch = cellValue.toLowerCase().includes(searchValue.min.toLowerCase());
+                            }
+                            if (searchValue.max && searchValue.max.length > 0) {
+                                textMatch = textMatch && cellValue.toLowerCase().includes(searchValue.max.toLowerCase());
+                            }
+                            
+                            // Numerikus keresés (ha van szám a cellában)
+                            var numericMatch = true;
+                            if (!isNaN(numericValue)) {
+                                if (searchValue.min && !isNaN(parseFloat(searchValue.min))) {
+                                    numericMatch = numericValue >= parseFloat(searchValue.min);
+                                }
+                                if (searchValue.max && !isNaN(parseFloat(searchValue.max))) {
+                                    numericMatch = numericMatch && numericValue <= parseFloat(searchValue.max);
+                                }
+                            }
+                            
+                            return textMatch || numericMatch;
+                        });
+                    }
+
+                    table.draw();
+                    $.fn.dataTable.ext.search.pop();
+                }, 300);
+            });
+
+            // Megakadályozzuk a szűrő mezők kattintásának továbbítását
+            $('.column-filter').on('click', function(e) {
+                e.stopPropagation();
+            });
+
+            // Oszlopfejlécek rendezése
+            $('#matchesTable thead tr:first th').on('click', function() {
+                var columnIndex = $(this).index();
+                table.order([columnIndex, table.order()[0][1] === 'asc' ? 'desc' : 'asc']).draw();
+            });
+
+            // Hibakezelés
+            table.on('error.dt', function(e, settings, techNote, message) {
+                console.error('DataTables hiba:', message);
+            });
+        });
+
+        // További odds megjelenítése
+        function showAllOdds(odds) {
+            console.log('showAllOdds meghívva:', odds);
+            
+            if (!odds || !Array.isArray(odds) || odds.length === 0) {
+                console.log('Nincs odds adat');
+                return;
+            }
+            
+            const modal = document.getElementById('oddsModal');
+            const table = modal.querySelector('#oddsTable tbody');
+            
+            // Táblázat törlése
+            table.innerHTML = '';
+            
+            // Odds csoportosítása fogadóirodák szerint
+            const bookmakerOdds = {};
+            odds.forEach(odd => {
+                if (!bookmakerOdds[odd.bookmaker_name]) {
+                    bookmakerOdds[odd.bookmaker_name] = {
+                        bookmaker_name: odd.bookmaker_name,
+                        fixture_id: odd.fixture_id,
+                        Home: null,
+                        Draw: null,
+                        Away: null
+                    };
+                }
+                bookmakerOdds[odd.bookmaker_name][odd.bet_value] = odd.odd;
+            });
+            
+            // Táblázat feltöltése
+            Object.values(bookmakerOdds)
+                .sort((a, b) => a.bookmaker_name.localeCompare(b.bookmaker_name))
+                .forEach(bookmaker => {
+                    const row = table.insertRow();
+                    row.innerHTML = `
+                        <td>${bookmaker.bookmaker_name}</td>
+                        <td>${bookmaker.Home ? bookmaker.Home.toFixed(2) : '-'}</td>
+                        <td>${bookmaker.Draw ? bookmaker.Draw.toFixed(2) : '-'}</td>
+                        <td>${bookmaker.Away ? bookmaker.Away.toFixed(2) : '-'}</td>
+                    `;
+                    
+                    // Kattintás esemény hozzáadása a sorra és a cellákra
+                    row.onclick = function() {
+                        loadOddsHistory(bookmaker.fixture_id, bookmaker.bookmaker_name);
+                        
+                        // Aktív sor kiemelése
+                        table.querySelectorAll('tr').forEach(r => r.classList.remove('active'));
+                        this.classList.add('active');
+                    };
+                });
+            
+            // Első sor kiválasztása és történet betöltése
+            if (Object.keys(bookmakerOdds).length > 0) {
+                const firstBookmaker = Object.values(bookmakerOdds)[0];
+                const firstRow = table.querySelector('tr');
+                if (firstRow) {
+                    firstRow.classList.add('active');
+                    loadOddsHistory(firstBookmaker.fixture_id, firstBookmaker.bookmaker_name);
+                }
+            }
+            
+            // Modal megjelenítése
+            modal.style.display = "block";
+            
+            // Bezárás gomb eseménykezelő
+            const closeBtn = modal.querySelector('.close');
+            closeBtn.onclick = function() {
+                modal.style.display = "none";
+            }
+            
+            // Kattintás a modalon kívülre
+            window.onclick = function(event) {
+                if (event.target == modal) {
+                    modal.style.display = "none";
+                }
+            }
+        }
+        
+        function loadOddsHistory(fixtureId, bookmakerName) {
+            console.log('Odds történet lekérése:', fixtureId, bookmakerName);
+            
+            fetch(`/api/odds_history?fixture_id=${fixtureId}&bookmaker_name=${encodeURIComponent(bookmakerName)}`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Odds történet adatok:', data);
+                    
+                    if (!data || (!data.Home.length && !data.Draw.length && !data.Away.length)) {
+                        console.log('Nincs odds történet adat');
+                        return;
+                    }
+                    
+                    const traces = [];
+                    
+                    // Home odds
+                    if (data.Home.length > 0) {
+                        traces.push({
+                            x: data.Home.map(d => new Date(d.update_time * 1000)),
+                            y: data.Home.map(d => d.odd),
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: 'Home',
+                            line: { width: 2, color: 'rgb(31, 119, 180)' },
+                            marker: { size: 6 }
+                        });
+                    }
+                    
+                    // Draw odds
+                    if (data.Draw.length > 0) {
+                        traces.push({
+                            x: data.Draw.map(d => new Date(d.update_time * 1000)),
+                            y: data.Draw.map(d => d.odd),
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: 'Draw',
+                            line: { width: 2, color: 'rgb(255, 127, 14)' },
+                            marker: { size: 6 }
+                        });
+                    }
+                    
+                    // Away odds
+                    if (data.Away.length > 0) {
+                        traces.push({
+                            x: data.Away.map(d => new Date(d.update_time * 1000)),
+                            y: data.Away.map(d => d.odd),
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: 'Away',
+                            line: { width: 2, color: 'rgb(44, 160, 44)' },
+                            marker: { size: 6 }
+                        });
+                    }
+                    
+                    const layout = {
+                        title: `Odds történet - ${bookmakerName}`,
+                        xaxis: {
+                            title: 'Idő',
+                            tickformat: '%Y-%m-%d %H:%M'
+                        },
+                        yaxis: {
+                            title: 'Odds érték'
+                        },
+                        hovermode: 'closest',
+                        showlegend: true,
+                        legend: {
+                            orientation: 'h',
+                            y: -0.2
+                        }
+                    };
+                    
+                    console.log('Traces:', traces);
+                    console.log('Layout:', layout);
+                    
+                    const chartDiv = document.getElementById('oddsChart');
+                    console.log('Chart div:', chartDiv);
+                    
+                    Plotly.newPlot('oddsChart', traces, layout)
+                        .then(() => console.log('Chart created successfully'))
+                        .catch(error => console.error('Error creating chart:', error));
+                })
+                .catch(error => console.error('Hiba:', error));
+        }
+
+        // Oldal betöltésekor állítsuk vissza a szűrőket
+        $(document).ready(function() {
+            // Ha van mentett filterValues, állítsuk vissza a szűrőket
+            if (Object.keys(filterValues).length > 0) {
+                Object.keys(filterValues).forEach(function(key) {
+                    var [column, type] = key.split('-');
+                    $('.column-filter.' + type + '[data-column="' + column + '"]').val(filterValues[key]);
+                });
+                table.draw();
+            }
+        });
+    </script>
+</body>
+</html>

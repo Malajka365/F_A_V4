@@ -234,11 +234,18 @@ def get_matches_percentage_data():
         # az összes Pythonban számított/használt oszlopot Pythonban rendezzük.
         edge_column_indices = {21, 22, 23, 24}
 
+        # Alapértelmezett SQL rendezés, ha nincs más megadva
         if order_column_idx not in edge_column_indices and order_column_idx in allowed_columns:
-            order_column = allowed_columns.get(order_column_idx, 'f.date')
+            order_column = allowed_columns.get(order_column_idx) # Nem kell alapértelmezett 'f.date', mert az allowed_columns biztosítja az érvényességet
             sql_order_clause = f" ORDER BY {order_column} {order_direction}"
-        elif order_column_idx not in edge_column_indices: # Ha nincs explicit SQL rendezés, alapértelmezett
-             sql_order_clause = f" ORDER BY f.date {order_direction}"
+        elif order_column_idx in edge_column_indices:
+            # Ha Pythonban rendezendő oszlop van kiválasztva, nincs szükség SQL ORDER BY-ra,
+            # vagy egy alapértelmezett SQL rendezést tarthatunk fenn a Python rendezés előtti állapotra.
+            # Az egyszerűség kedvéért most nem adunk hozzá SQL ORDER BY-t, ha Pythonban fogunk rendezni.
+            # De egy stabilabb alaprendezés (pl. dátum) hasznos lehet az SQL oldalon is.
+            sql_order_clause = f" ORDER BY f.date DESC" # Alapértelmezett rendezés, ha Pythonban fogunk rendezni, hogy konzisztens legyen a lekérdezés
+        else: # Alapértelmezett rendezés, ha nincs specifikus, vagy érvénytelen az order_column_idx
+            sql_order_clause = f" ORDER BY f.date {order_direction}"
 
 
         # Végső lekérdezés összeállítása (LIMIT és OFFSET nélkül egyelőre)
@@ -276,18 +283,19 @@ def get_matches_percentage_data():
                 row_dict.pop(k, None)
             all_data_from_sql.append(row_dict)
 
-        # Python oldali szűrés az Edge% oszlopokra és Összes Vendég %-ra (ha van)
-        # Az Összes Vendég % (total_away_percentage) oszlop indexe 21, ami 'p.away_win_percentage' az SQL-ben
-        # és 'total_away_percentage' a Python dict-ben.
+        logger.debug(f"Adatok száma SQL lekérdezés után: {len(all_data_from_sql)}")
+
+        # Python oldali szűrés az Edge% oszlopokra.
+        # Az "Összes Vendég %" (total_away_percentage, index 21) oszlopot már az SQL szűri.
         # Az Edge oszlopok indexei: home_edge: 22, draw_edge: 23, away_edge: 24
 
         python_filtered_data = []
         
-        # Szűrő paraméterek az Edge oszlopokhoz és total_away_percentage-hez
+        # Szűrő paraméterek az Edge oszlopokhoz
         edge_filter_params = {}
         # Oszlop indexek a frontendről, és a megfelelő kulcsok a `row_dict`-ben
+        # Kivettük a 21-es indexet (total_away_percentage), mert azt már az SQL szűri.
         python_filterable_columns = {
-            21: 'total_away_percentage', # Ez az 'Összes Vendég %'
             22: 'home_edge',
             23: 'draw_edge',
             24: 'away_edge'
@@ -301,59 +309,55 @@ def get_matches_percentage_data():
                     min_val = search_params.get('min')
                     max_val = search_params.get('max')
 
-                    # Vessző csere pontra és float konverzió
                     if min_val is not None:
                         min_val = float(str(min_val).replace(',', '.'))
                     if max_val is not None:
                         max_val = float(str(max_val).replace(',', '.'))
 
                     edge_filter_params[data_key] = {'min': min_val, 'max': max_val}
+                    logger.debug(f"Python szűrő aktív: {data_key}, min: {min_val}, max: {max_val}")
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"Érvénytelen JSON vagy érték a(z) {data_key} szűrőhöz: {search_value_str}, hiba: {e}")
 
+        if not edge_filter_params: # Ha nincs aktív Python oldali szűrő
+            python_filtered_data = all_data_from_sql
+        else:
+            for row_dict in all_data_from_sql:
+                match = True
+                for data_key, params in edge_filter_params.items():
+                    value = row_dict.get(data_key)
+                    if value is None:
+                        match = False
+                        break
 
-        for row_dict in all_data_from_sql:
-            match = True
-            for data_key, params in edge_filter_params.items():
-                value = row_dict.get(data_key)
-                if value is None: # Ha az érték None, nem felel meg a min/max szűrőnek (kivéve, ha a szűrő is None)
-                    match = False
-                    break
+                    if params['min'] is not None and round(value, 2) < round(params['min'], 2):
+                        match = False
+                        break
+                    if params['max'] is not None and round(value, 2) > round(params['max'], 2):
+                        match = False
+                        break
 
-                # Kerekítés 2 tizedesjegyre a szűrés előtt, ahogy a process_numeric_filter is teszi
-                # Az Edge értékek már kerekítve vannak a számításkor.
-                # A total_away_percentage (p.away_win_percentage) is valószínűleg kerekítve van az adatbázisban vagy a rendereléskor.
-                # A biztonság kedvéért itt is kerekíthetünk, ha szükséges, de a `value` már a végleges érték.
-
-                if params['min'] is not None and round(value, 2) < round(params['min'], 2):
-                    match = False
-                    break
-                if params['max'] is not None and round(value, 2) > round(params['max'], 2):
-                    match = False
-                    break
-
-            if match:
-                python_filtered_data.append(row_dict)
+                if match:
+                    python_filtered_data.append(row_dict)
 
         total_filtered_after_python = len(python_filtered_data)
+        logger.debug(f"Adatok száma Python oldali szűrés után: {total_filtered_after_python}")
 
-        # Rendezés Pythonban, ha a rendezési oszlop az Edge vagy total_away_percentage oszlopok egyike
-        # A `order_column_idx` a frontend által küldött oszlopindex
-        # `python_filterable_columns` mapolja ezt a `row_dict` kulcsaira
-        if order_column_idx in python_filterable_columns:
-            sort_key_name = python_filterable_columns[order_column_idx]
+        # Rendezés Pythonban, ha a rendezési oszlop az Edge oszlopok egyike
+        # (A 21-es oszlopra, total_away_percentage, már az SQL rendez, ha az van kiválasztva)
+        python_sortable_column_keys = {idx: key for idx, key in python_filterable_columns.items() if idx in edge_column_indices} # Csak a 22,23,24
+
+        if order_column_idx in python_sortable_column_keys: # Csak az Edge oszlopokra
+            sort_key_name = python_sortable_column_keys[order_column_idx]
             reverse_sort = (order_direction == 'desc')
 
-            # None értékek hátra kerüljenek függetlenül a rendezési iránytól
             python_filtered_data.sort(key=lambda x: (x[sort_key_name] is None, x[sort_key_name]), reverse=reverse_sort)
-        elif not sql_order_clause: # Ha nem volt SQL rendezés (mert pl. Edge oszlopra volt, de az üres)
-                                   # és a jelenlegi order_column_idx sem Pythonban rendezendő, akkor alapértelmezett dátum szerint.
-                                   # Ez a rész már nem feltétlenül szükséges, ha az sql_order_clause mindig beállít egy alap rendezést.
-            python_filtered_data.sort(key=lambda x: x.get('date', datetime.min.isoformat()), reverse=(order_direction == 'desc'))
-
+            logger.debug(f"Rendezés Pythonban: {sort_key_name}, irány: {'DESC' if reverse_sort else 'ASC'}")
+        # Ha a rendezés SQL oldalon történt, akkor a python_filtered_data már a helyes SQL rendezést örökli.
 
         # Lapozás alkalmazása a Python által szűrt és rendezett adatokra
         paginated_data = python_filtered_data[start : start + length]
+        logger.debug(f"Lapozott adatok száma: {len(paginated_data)}")
         
         # Összes rekord száma szűrés nélkül (ez maradhat, a teljes adatbázisra vonatkozik)
         # Ezt csak egyszer kell lekérdezni, ha még nincs meg.
